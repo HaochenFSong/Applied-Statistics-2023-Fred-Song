@@ -1,0 +1,219 @@
+---
+title: "Lab 2"
+author: "Fred Haochen Song"
+format: pdf
+editor: visual
+---
+
+# Lab Exercise:
+
+```{r}
+#| message: false
+options(warn=-1)
+library(opendatatoronto)
+library(tidyverse)
+library(stringr)
+library(skimr) # EDA
+library(visdat) # EDA
+library(janitor)
+library(lubridate)
+library(ggrepel)
+```
+
+To be handed in via submission of quarto file (and rendered pdf) to GitHub.
+
+## **1. Using the \`delay_2022\` data, plot the five stations with the highest mean delays. Facet the graph by \`line\`**
+
+Let's reload the data first:
+
+```{r}
+res <- list_package_resources("996cfe8d-fb35-40ce-b569-698d51fc683b") # obtained code from searching data frame above
+res <- res |> mutate(year = str_extract(name, "202.?"))
+delay_2022_ids <- res |> filter(year==2022) |> select(id) |> pull()
+delay_2022 <- get_resource(delay_2022_ids)
+
+# make the column names nicer to work with
+delay_2022 <- clean_names(delay_2022)
+
+## Removing the observations that have non-standardized lines
+
+delay_2022 <- delay_2022 |> filter(line %in% c("BD", "YU", "SHP", "SRT"))
+
+delay_codes <- get_resource("3900e649-f31e-4b79-9f20-4731bbfd94f7")
+delay_data_codebook <- get_resource("ca43ac3d-3940-4315-889b-a9375e7b8aa4")
+
+delay_2022 <- delay_2022 |> 
+  left_join(delay_codes |> rename(code = `SUB RMENU CODE`, code_desc = `CODE DESCRIPTION...3`) |> select(code, code_desc)) 
+
+
+delay_2022 <- delay_2022 |>
+  mutate(code_srt = ifelse(line=="SRT", code, "NA")) |> 
+  left_join(delay_codes |> rename(code_srt = `SRT RMENU CODE`, code_desc_srt = `CODE DESCRIPTION...7`) |> select(code_srt, code_desc_srt))  |> 
+  mutate(code = ifelse(code_srt=="NA", code, code_srt),
+         code_desc = ifelse(is.na(code_desc_srt), code_desc, code_desc_srt)) |> 
+  select(-code_srt, -code_desc_srt)
+
+delay_2022 <- delay_2022 |> 
+  mutate(station_clean = ifelse(str_starts(station, "ST"), word(station, 1,2), word(station, 1)))
+
+delay_2022 <- delay_2022 |> 
+  mutate(code_red = case_when(
+    str_starts(code_desc, "No") ~ word(code_desc, 1, 2),
+    str_starts(code_desc, "Operator") ~ word(code_desc, 1,2),
+    TRUE ~ word(code_desc,1))
+         )
+```
+
+And do the plot below:
+
+```{r}
+delay_2022 |>
+  group_by(line, station) |>
+  summarise(mean_delay = mean(min_delay)) |>
+  arrange(-mean_delay) |>
+  slice(1:5) |>
+  ggplot(aes(x = station,
+             y = mean_delay)) +
+  geom_col() + 
+  facet_wrap(vars(line), 
+             scales = "free_y",
+             nrow = 4) +
+  coord_flip()
+  
+```
+
+## 2. **Using the \`opendatatoronto\` package, download the data on mayoral campaign contributions for 2014.**
+
+Hints:
+
+\+ find the ID code you need for the package you need by searching for 'campaign' in the \`all_data\` tibble above: The ID I found was: f6651a40-2f52-46fc-9e04-b760c16edd5c
+
+\+ you will then need to \`list_package_resources\` to get ID for the data file
+
+\+ note: the 2014 file you will get from \`get_resource\` has a bunch of different campaign contributions, so just keep the data that relates to the Mayor election
+
+```{r}
+cap <- list_package_resources("f6651a40-2f52-46fc-9e04-b760c16edd5c")
+cap_2014 <- get_resource('5b230e92-0a22-4a15-9572-0b19cc222985')
+dat <- cap_2014$'2_Mayor_Contributions_2014_election.xls'
+head(dat)
+```
+
+## **3. Clean up the data format (fixing the parsing issue and standardizing the column names using \`janitor\`)**
+
+Hi Professor! I'm not so sure if I understand this question...so I tried to fix the basic issue of the data where the first column is not displayed correctly, and the column names were not assigned...so sorry if I misinterpret it...
+
+```{r}
+dat <- dat |>
+  row_to_names(1)
+head(dat)
+```
+
+## **4. Summarize the variables in the dataset. Are there missing values, and if so, should we be worried about them? Is every variable in the format it should be? If not, create new variable(s) that are in the right format.**
+
+### **a.** is there missing values?
+
+```{r}
+dat|> 
+  summarize(across(everything(), ~ sum(is.na(.x))))
+```
+
+**Answer:** There are missing values but we don't need to worry about them, because those columns with Missing values are of really large scale, therefore we can just not use those columns at all.
+
+### **b.** is every variable in the format it should be?
+
+**Answer:** No, the contribution amount should be of type dbl or int, let's change it to dbl.
+
+```{r}
+dat$`Contribution Amount` <- as.numeric(dat$`Contribution Amount`)
+head(dat)
+```
+
+## **5. Visually explore the distribution of values of the contributions. What contributions are notable outliers? Do they share a similar characteristic(s)? It may be useful to plot the distribution of contributions without these outliers to get a better sense of the majority of the data.**
+
+```{r}
+ggplot(data = dat) + 
+  geom_histogram(aes(x = `Contribution Amount`))+
+  scale_x_log10()
+```
+
+it can be seen that contribution amount \> 10000 are clearly outliers, let's take a look at them:
+
+```{r}
+dat |>
+  filter(`Contribution Amount` > 10000) |>
+  select(`Contributor's Name`,`Contribution Amount`, Candidate)
+```
+
+It can be seen that they all come from the candidate themselves, i.e. contributor's name = candidate.
+
+let's remove the outliers:
+
+```{r}
+dat |>
+  filter(`Contribution Amount` <= 10000) |>
+  ggplot(aes(x = `Contribution Amount`))+
+  geom_histogram()+
+  scale_x_log10()
+```
+
+## 6. List the top five candidates in each of these categories: + total contributions + mean contribution + number of contributions
+
+a.  Total contributions:
+
+```{r}
+dat |>
+  group_by(Candidate) |>
+  summarise(tot_contribution = sum(`Contribution Amount`)) |>
+  arrange(-tot_contribution) |>
+  slice(1:5)
+
+```
+
+b.  Mean contributions:
+
+```{r}
+dat |>
+  group_by(Candidate) |>
+  summarise(mean_contribution = mean(`Contribution Amount`)) |>
+  arrange(-mean_contribution) |>
+  slice(1:5)
+
+```
+
+c.  Number of Contributions:
+
+```{r}
+dat |>  
+  group_by(Candidate) |>
+  summarise(cnt_contribution = length(`Contribution Amount`)) |>
+  arrange(-cnt_contribution) |>
+  slice(1:5)
+
+```
+
+## 7. Repeat 5 but without contributions from the candidates themselves.
+
+let's plot them here:
+
+```{r}
+dat |>
+  filter(`Contributor's Name`!= Candidate) |>
+  ggplot(aes(x = `Contribution Amount`))+
+  geom_histogram()+
+  scale_x_log10()
+```
+
+## 8. How many contributors gave money to more than one candidate?
+
+```{r}
+dat |>
+  group_by(`Contributor's Name`, Candidate) |>
+  summarise(unique_candidate = unique(Candidate)) |>
+  filter (length(unique_candidate) >1) |>
+  summarise(num_candidate = length(unique_candidate)) |>
+  select(`Contributor's Name`, num_candidate) 
+
+```
+
+There are in total 184 contributors gave money more than one candidate.
