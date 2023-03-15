@@ -1,0 +1,665 @@
+---
+title: "STA2201H Winter 2023 Assignment 2"
+output: 
+  pdf_document:
+    number_sections: true
+fontsize: 11pt
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+**Due:** 11:59pm ET, March 10
+
+**What to hand in:** .Rmd or .qmd file and the compiled pdf, and any
+stan files
+
+**How to hand in:** Submit files via Quercus
+
+```{r}
+library(tidyverse)
+```
+
+\newpage
+
+# IQ
+
+Suppose we are to sample $n$ individuals from a particular town and then
+estimate $\mu$, the town-specific mean IQ score, based on the sample of
+size $n$. Let $Y_i$ denote the IQ score for the $i$th person in the town
+of interest, and assume
+
+$$
+Y_{1}, Y_{2}, \ldots, Y_{n} | \mu, \sigma^{2} \sim N\left(\mu, \sigma^{2}\right)
+$$
+
+For this question, will assume that the onserved standard deviation of
+the IQ scores in the town is equal to 15, the observed mean is equal to
+113 and the number of observations is equal to 10. Additionally, for
+Bayesian inference, the following prior will be used:
+
+$$
+\mu \sim N\left(\mu_{0}, \sigma_{\mu 0}^{2}\right)
+$$ with $\mu_{0} = 100$ and $\sigma_{\mu 0} = 15$.
+
+a)  Write down the posterior distribution of $\mu$ based on the
+    information above. Give the Bayesian point estimate and a 95%
+    credible interval of $\mu$,
+    $\hat{\mu}_{Bayes} = E(\mu|\boldsymbol{y})$.
+
+![](images/Assignment%202%201a.jpg)
+
+We will now compare the sampling properties of the Bayes estimator to
+the sample mean, which is the ML estimator.
+
+b)  Suppose that (unknown to us) the true mean IQ score is $\mu^*$. To
+    evaluate how close an estimator is to the truth, we might want to
+    use the mean squared error (MSE)
+    $\operatorname{MSE}\left[\hat{\mu} | \mu^{*}\right]=E\left[\left(\hat{\mu}-\mu^{*}\right)^{2} | \mu^{*}\right]$.
+    Show the MSE is equal to the variance of the estimator plus the bias
+    of the estimator squared, i.e.
+
+$$
+\operatorname{MSE}\left[\hat{\mu} | \mu^{*}\right]= \operatorname{Var}\left[\hat{\mu} | \mu^{*}\right]+\operatorname{Bias}\left(\hat{\mu} | \mu^{*}\right)^{2}
+$$
+
+![](images/Assignment%202%201b.jpg)
+
+c)  Suppose that the true mean IQ score is 112. Calculate the bias,
+    variance and MSE of the Bayes and ML estimates. Which estimate has a
+    larger bias? Which estimate has a larger MSE?
+
+    ![](images/Assignment%202%201c.jpg)
+
+d)  Write down the sampling distributions for the ML and Bayes
+    estimates, again assuming $\mu^* = 112$ and $\sigma = 15$. Plot the
+    two distributions on the one graph. Summarize your understanding of
+    the differences in bias, variance and MSE of the two estimators by
+    describing how these differences relate to differences in the
+    sampling distributions as plotted. To further illustrate the point,
+    obtain the Bayes and ML MSEs for increasing sample sizes and plot
+    the ratio (Bayes MSE)/(ML MSE) against sample size.
+
+![](images/Assignment%202%201d.jpg)
+
+Let's plot the sampling distributions below:
+
+```{r}
+
+# using the 95% information we acquired from a), set X values to be between 85 to 139
+
+x.values = seq(85,139, length = 1000)
+mu_ml <- dnorm(x.values, 112, 15^2/10)
+mu_bayes <- dnorm(x.values, 1230/11, 15^2/11)
+
+d <- tibble(x = x.values, mu_ml = mu_ml, mu_bayes = mu_bayes)
+
+d |> pivot_longer(mu_ml:mu_bayes, names_to = "estimator", values_to = 'density') |>
+  ggplot(aes(x, density, color = estimator)) +
+  geom_line()+
+  ggtitle('plot of the sampling distribution for two estimators')+
+  theme_classic()
+```
+
+as we can see from the above plot, the mu_bayes estimator on average has
+a smaller variance, and a higher density near the true mean value of
+112, hence contributing to both a smaller Bias and a smaller variance at
+mu\* = 112,and hence a smaller MSE. if however, mu\* changes, then it is
+hard to determine which estimator has a smaller MSe as the mu_ML
+outperforms mu_bayes at some part on the graph.
+
+Now to further illustrate this, let's look at the ratio of MSE bayes
+over MSE Ml:
+
+```{r}
+n.values = seq(1,50, by = 1)
+
+MSE_ratio <- function(n){
+  (15^2/(n+1)+((113*n+100)/(n+1) - 112)^2)/(1+ 15^2/n)
+}
+
+ratio <- MSE_ratio(n.values)
+
+tibble(n.values, ratio) |>
+  ggplot(aes(x= n.values, y = ratio))+
+  geom_line()+
+  ggtitle("MSE Bayes over MSE ML")+
+  theme_classic()
+```
+
+as we can see, with a y_bar of 112 fixed, Bayes estimator significantly
+outperforms ML estimator when n is less than 30, but when n gets larger,
+such out-performance decreases.
+
+\newpage
+
+# Gompertz
+
+Gompertz hazards are of the form
+
+$$
+\mu_x = \alpha e^{\beta x}
+$$ for $x \in [0, \infty)$ with $\alpha, \beta>0$. It is named after
+Benjamin Gompertz, who suggested a similar form to capture a 'law of
+human mortality' in 1825.
+
+This question uses data on deaths by age in Sweden over time. The data
+are in the `sweden` file in the class repo. I grabbed the data from the
+[Human Mortality Database](https://mortality.org/).
+
+We will assume that the deaths we observe in a particular age group are
+Poisson distributed with a rate equal to the mortality rate multiplied
+by the population, i.e. $$
+D_x \sim \text{Poisson}(\mu_xP_x)
+$$ where $x$ refers to age. In this question we will be estimating
+mortality rates using the Gompertz model as described above.
+let's first read in the data:
+
+```{r}
+data <- read.csv('sweden.csv')
+```
+
+a)  Describe, with the aid of a couple of graphs, some key observations
+    of how mortality above age 50 in Sweden has changed over time.
+    
+let's first see the range of the age group:
+```{r}
+min(data$age)
+max(data$age)
+```
+as we can see from the results above, the minimum age of mortality is 50 in the data, and maximum is 100 ages old.
+
+Let's divide the age group into 5 groups, 50-59,60-69,70-79,80-89,90-100:
+
+```{r}
+library(dplyr)
+df <- data |>
+  mutate(
+    age_group = case_when(
+      age >= 50 & age <= 59 ~ "50-59",
+      age >= 60 & age <= 69 ~ "60-69",
+      age >= 70 & age <= 79 ~ "70-79",
+      age >= 80 & age <= 89 ~ "80-89",
+      age >= 90 & age <= 100 ~ "90-100",
+    ),
+    age_group = factor(
+      age_group,
+      level = c("50-59", "60-69","70-79", "80-89", "90-100")
+    )
+  )
+
+```
+
+and we can make a plot of the log death number, filtered by age group, averaged on the group mean:
+
+```{r}
+df |> 
+  group_by(age_group,year) |>
+  summarise(group_avg_death = mean(deaths)) |>
+  ggplot(aes(x = year, y = group_avg_death, color = age_group)) +
+  geom_line() +
+  labs(title = 'Group average deaths plot by year', y = "average deaths")+
+  theme_classic()
+```
+
+As we can see, if we separate things on the number of deaths, all the age groups are pretty layered. Although it is quite surprising that age group 80-89 has the highest deaths number, this could be quite biased because we are not comparing them at a similar scale; therefore, we can convert them into mortality rate by dividing them into group log mortality rate:
+
+```{r}
+df |> 
+  group_by(age_group,year) |>
+  summarise(group_avg_mortality = mean(deaths)/mean(pop)) |>
+  ggplot(aes(x = year, y = log(group_avg_mortality), color = age_group)) +
+  geom_line() +
+  labs(title = 'Group average deaths plot by year', y = "average deaths")+
+  theme_classic()
+```
+as we can see, the log mortality rate is very well layered with highest to lowest based the magnitude of age. this could be very helpful for us to later fit the model, to be safe, let's also look at the case where we divide them in to 10 groups instead of 5 groups, see if the result could be persistent.
+
+```{r}
+data |>
+  mutate(
+    age_group = case_when(
+      age >= 50 & age <= 54 ~ "50-54",
+      age >= 55 & age <= 59 ~ "55-59",
+      age >= 60 & age <= 64 ~ "60-64",
+      age >= 65 & age <= 69 ~ "65-69",
+      age >= 70 & age <= 74 ~ "70-74",
+      age >= 75 & age <= 79 ~ "75-79",
+      age >= 80 & age <= 84 ~ "80-84",
+      age >= 85 & age <= 89 ~ "85-89",
+      age >= 90 & age <= 94 ~ "90-94",
+      age >= 95 & age <= 100 ~ "95-100",
+    ),
+    age_group = factor(
+      age_group,
+      level = c("50-54", "55-59", "60-64", "65-69",
+                "70-74", "75-79", "80-84", "85-89",
+                "90-94", "95-100")
+    )
+  ) |>
+  group_by(age_group,year) |>
+  summarise(group_avg_mortality = mean(deaths)/mean(pop)) |>
+  ggplot(aes(x = year, y = log(group_avg_mortality), color = age_group)) +
+  geom_line() +
+  labs(title = 'Group average deaths plot by year', y = "average deaths")+
+  theme_classic()
+```
+
+as we can see, they are still very wellly layered out, therefore suggesting that a layered mortality rate model would be useful for weakly informative prior in model fitting, and in terms of trend with respect to time, the mortality rate is in general decreasing, with smaller the age, the more significant the decrement is.
+
+
+b)  Carry out prior predictive checks for $\alpha$ and $\beta$, based on
+    populations by age in Sweden in 2020. Summarize what you find and
+    what you decide to be weakly informative priors for these
+    parameters.
+    
+let's look at the mortality rate for 2020:
+
+```{r}
+df |>  
+  group_by(age,year) |>
+  summarise(avg_mortality = mean(deaths)/mean(pop)) |>
+  filter(year == 2020) |>
+  ggplot(aes(x = age, y = log(avg_mortality))) +
+  geom_line() +
+  labs(title = 'Year 2020 age vs. log mortality') +
+  theme_bw()
+```
+as we can see the log mortality is nearly a linear line, that gives us good reasoning to estimate alpha and beta:
+
+```{r}
+
+```
+
+c)  Fit a model in Stan to estimate $\alpha$ and $\beta$ for the
+    year 2020. Note that it may be easier to specify the likelihood on
+    the log scale (you can do this in Stan using the `poisson_log`
+    function). Priors should be informed by your prior predictive checks
+    and any other information available. Ensure that the model has
+    converged and other diagnostics are good. Interpret your estimates
+    for $\alpha$ and $\beta$.
+d)  Carry out some posterior predictive checks to assess model
+    performance.\
+e)  Now extend your model to estimate $\alpha$ and $\beta$ in every year
+    over the interval 1990-2020. Plot the resulting point estimates and
+    95% credible intervals for your estimates of $\alpha$ and $\beta$
+    over time. Comment briefly on what you observe.
+f)  Life expectancy at age $x$ is defined as $$
+    \int_x^{\omega} e^{-\mu_a}da
+    $$ where $\omega$ is the oldest age group (you may assume this is
+    age 100). Life expectancy is the expected number of years of life
+    left at age $x$. The integral can be approximated by summing over
+    discrete age groups. Based on your estimates in the previous
+    question, estimate life expectancy at age 40 (note starting age!)
+    for every year from 1990-2020. Plot your resulting point estimates
+    and 95% credible intervals over time and comment briefly.
+
+\newpage
+
+# Wells
+
+This question uses data looking at the decision of households in
+Bangladesh to switch drinking water wells in response to their well
+being marked as unsafe or not. A full description from the Gelman Hill
+text book (page 87):
+
+*"Many of the wells used for drinking water in Bangladesh and other
+South Asian countries are contaminated with natural arsenic, affecting
+an estimated 100 million people. Arsenic is a cumulative poison, and
+exposure increases the risk of cancer and other diseases, with risks
+estimated to be proportional to exposure. Any locality can include wells
+with a range of arsenic levels. The bad news is that even if your
+neighbor's well is safe, it does not mean that yours is safe. However,
+the corresponding good news is that, if your well has a high arsenic
+level, you can probably find a safe well nearby to get your water
+from---if you are willing to walk the distance and your neighbor is
+willing to share. [In an area of Bangladesh, a research team] measured
+all the wells and labeled them with their arsenic level as well as a
+characterization as"safe" (below 0.5 in units of hundreds of micrograms
+per liter, the Bangladesh standard for arsenic in drinking water) or
+"unsafe" (above 0.5). People with unsafe wells were encouraged to switch
+to nearby private or community wells or to new wells of their own
+construction. A few years later, the researchers returned to find out
+who had switched wells."*
+
+The outcome of interest is whether or not household $i$ switched wells:
+
+$$
+y_{i}=\left\{\begin{array}{ll}1 & \text { if household } i \text { switched to a new well } \\ 0 & \text { if household } i \text { continued using its own well. }\end{array}\right.
+$$
+
+The data we are using for this question are here:
+<http://www.stat.columbia.edu/~gelman/arm/examples/arsenic/wells.dat>
+and you can load them in directly using `read_table`.
+
+The variables of interest for this questions are
+
+-   `switch`, which is $y_i$ above
+-   `arsenic`, the level of arsenic of the respondent's well
+-   `dist`, the distance (in metres) of the closest known safe well
+
+let's first read in the data
+
+```{r}
+ds <- read.table("http://www.stat.columbia.edu/~gelman/arm/examples/arsenic/wells.dat")
+```
+
+a)  Do an exploratory data analysis illustrating the relationship
+    between well-switching, distance and arsenic. Think about different
+    ways of effectively illustrating the relationships given the binary
+    outcome. As usual, a good EDA includes well-thought-out descriptions
+    and analysis of any graphs and tables provided, well-labelled axes,
+    titles etc. \newpage Assume $y_i \sim Bern(p_i)$, where $p_i$ refers
+    to the probability of switching. Consider two candidate models.
+
+let's first plot the hitogram of the distance and arsenic under switch
+or not:
+
+for distance:
+
+```{r}
+ds |> ggplot() +
+  geom_histogram(aes(x = dist, y = ..density.., fill = as.factor(switch)), alpha = 0.5, bins = 30) +
+  labs(title = 'histogram of distance categorized by switch of not', x = 'Distance', fill = 'Swtich') +
+  theme_classic()
+  
+```
+
+    as we can see, on average, household uses their own well more frequent to household switched to a new well, regardless of their distance. However, it can be seen that as distance increases, there will be less and less house hold using well.
+
+Similarly, for arsenic level:
+
+```{r}
+ds |> ggplot() +
+  geom_histogram(aes(x = arsenic, y = ..density.., fill = as.factor(switch)), alpha = 0.5, bins = 30) +
+  labs(title = 'histogram of arsenic level categorized by switch of not', x = 'Arsenic Level', fill = 'Swtich') +
+  theme_classic()
+  
+```
+
+And a similar conclusion can be reached, that is, a larger proportion of
+people tend to stay with their own well, but for people who switch to
+another well, their arsenic level tend to be high, At a very low level
+of arsenic level, household tends to stay with their own well.
+
+Now we can create a scatter plot between distance and arsenic level,
+categorized by their switch or not.
+
+```{r}
+ds |>
+  ggplot(aes(dist - mean(dist), arsenic - mean(arsenic), color = as.factor(switch))) +
+  geom_point(alpha = 0.6) +
+  labs(title = 'distance - mean(distance) vs arsenic - mean(arsenic)',  color = 'Swtich')+
+  theme_classic() 
+
+```
+
+As we can see from the plot, on average for people who switch to a new
+well, they tend to have a higher arsenic level, and a lower distance.
+
+-   Model 1:
+    $$\operatorname{logit}\left(p_{i}\right)=\beta_{0}+\beta_{1} \cdot\left(d_{i}-\bar{d}\right)+\beta_{2} \cdot\left(a_{i}-\bar{a}\right)+\beta_{3} \cdot\left(d_{i}-\bar{d}\right)\left(a_{i}-\bar{a}\right)$$
+
+-   Model 2:
+
+$$\begin{aligned} \operatorname{logit}\left(p_{i}\right)=& \beta_{0}+\beta_{1} \cdot\left(d_{i}-\bar{d}\right)+\beta_{2} \cdot\left(\log \left(a_{i}\right)-\overline{\log (a)}\right) \\ 
+&+\beta_{3} \cdot\left(d_{i}-\bar{d}\right)\left(\log \left(a_{i}\right)-\overline{\log (a)}\right)
+\end{aligned}$$
+
+where $d_i$ is distance and $a_i$ is arsenic level.
+
+b)  Fit both of these models using Stan. Put $N(0,1)$ priors on all the
+    $\beta$s. You should generate pointwise log likelihood estimates (to
+    be used in later questions), and also samples from the posterior
+    predictive distribution (unless you'd prefer to do it in R later
+    on). For model 1, interpret each coefficient.
+
+let's write the following stan code, one in Q3_model1.stan, one in
+Q3_model2.stan
+
+```{r}
+library(rstan)
+
+dist <- ds$dist
+arsenic <- ds$arsenic
+p <- ds$switch
+N <- nrow(ds)
+
+stan_data <- list(N =N, dist = dist, arsenic = arsenic, p = p)
+mod1 <- stan(data = stan_data, 
+             file = 'Q3_model1.stan',
+             iter = 500,
+             seed = 245)
+```
+
+now we can extract the model summary for such from mod1:
+
+```{r}
+summary(mod1)$summary[1:4,]
+```
+with the above information, we can say that:
+
+beta0 : holding other dist-mean(dist), and arsenic- mean(arsenic) 0, on average people is exp(0.350292367) -1 = 42% more likely to switch to a new well
+beta1, beta3 : holding arsenic - mean(arsenic) constant, with one unit increase in dist-mean(dist), people are 1- exp(-0.008789761-0.001783209) = 1.05% less likely to switch to a new well.
+beta2, beta3 : holding dist - mean(dist) constant, with one unit increase in arsenic-mean(arsenic), people are exp(0.470130182 - -0.001783209) -1 = 60% more likely to switch to a new well.
+
+and we save the log-likelihood and p_hat
+```{r}
+log_lik_mod1 <- extract(mod1)[['log_lik']]
+p_hat_mod1 <- extract(mod1)[['p_hat']]
+```
+
+now let us run the stan code for model 2, and look at the summary:
+
+```{r}
+mod2 <- stan(data = stan_data, 
+             file = 'Q3_model2.stan',
+             iter = 500,
+             seed = 245)
+summary(mod2)$summary[1:4,]
+```
+and we can extract the results from mod2:
+
+```{r}
+log_lik_mod2 <- extract(mod2)[['log_lik']]
+p_hat_mod2 <- extract(mod2)[['p_hat']]
+```
+
+
+
+
+c)  Let
+    $t(\boldsymbol{y})=\sum_{i=1}^{n} 1\left(y_{i}=1, a_{i}<0.82\right) / \sum_{i=1}^{n} 1\left(a_{i}<0.82\right)$
+    i.e. the proportion of households that switch with arsenic level
+    less than 0.82. Calculate $t(\boldsymbol{y^{rep}})$ for each
+    replicated dataset for each model, plot the resulting histogram for
+    each model and compare to the observed value of $t(\boldsymbol{y})$.
+    Calculate
+    $P\left(t\left(\boldsymbol{y}^{r e p}\right)<t(\boldsymbol{y})\right)$
+    for each model. Interpret your findings.
+
+let's find the test statistics:
+
+```{r}
+
+stat_mod1 <- c()
+stat_mod2 <- c()
+
+for (i in 1:nrow(p_hat_mod1)){
+  stat_y <- sum(ds$switch ==1 & ds$arsenic<0.82)/sum(ds$arsenic<0.82)
+  stat_mod1[i] <- sum(p_hat_mod1[i,] == 1 & ds$arsenic<0.82)/sum(ds$arsenic<0.82)
+  stat_mod2[i] <- sum(p_hat_mod2[i,] == 1 & ds$arsenic<0.82)/sum(ds$arsenic<0.82)
+}
+```
+
+now let's plot the histogram, first for model 1:
+
+```{r}
+#Model 1:
+
+stat_mod1 |> 
+  as_tibble() |>
+  ggplot(aes(value)) +
+  geom_histogram(aes(fill = 'simulated'))+
+  geom_vline(aes(xintercept = stat_y, color = "observed"), lwd = 2)+
+  ggtitle('Model 1 test statistics')+
+  scale_color_manual(name = "", 
+                     values = c("observed" = "darkblue"))+
+  scale_fill_manual(name = "", 
+                     values = c("simulated" = "lightblue")) +
+  # the manual change of color idea is adapted from professor's blog post
+  theme_classic()
+```
+
+now for model 2:
+```{r}
+#Model 2:
+
+stat_mod2 |> 
+  as_tibble() |>
+  ggplot(aes(value)) +
+  geom_histogram(aes(fill = 'simulated'))+
+  geom_vline(aes(xintercept = stat_y, color = "observed"), lwd = 2)+
+  ggtitle('Model  2test statistics ')+
+  scale_color_manual(name = "", 
+                     values = c("observed" = "darkblue"))+
+  scale_fill_manual(name = "", 
+                     values = c("simulated" = "lightblue")) + 
+  
+  # the manual change of color idea is adapted from professor's blog post
+  theme_classic()
+```
+To calculate the proportion of the time:
+
+```{r}
+# for model 1:
+
+paste('The probability for t(y_rep) <t(y) for model 1 is: ', sum(stat_mod1 < stat_y)/nrow(p_hat_mod1))
+
+# for model 2:
+
+paste('The probability for t(y_rep) <t(y) for model 2 is: ', sum(stat_mod2 < stat_y)/nrow(p_hat_mod2))
+```
+as we can see, under a test statistics we used in c), model 2 has a better performance of 28.4% of the statistics we acquired from model 2 is less than the observed statistics, while for model 1 there is only 0.6% chance for its statistics to be less than the observed statistics.
+
+Therefore at this point of time, model 2 hass a better performance.
+
+d)  Use the `loo` package to get estimates of the expected log pointwise
+    predictive density for each point, $ELPD_i$. Based on
+    $\sum_i ELPD_i$, which model is preferred?
+    
+let's get the ELPD_i here:
+
+```{r}
+library(loo) 
+loo1 <- loo(log_lik_mod1, save_psis = TRUE)
+loo2 <- loo(log_lik_mod2, save_psis = TRUE)
+```
+and we can store the computed elpd_i in each elpd_i_mod1 and elpd_i_mod2:
+
+```{r}
+elpd_i_mod1 <- loo1$pointwise[,1]
+elpd_i_mod2 <- loo2$pointwise[,1]
+```
+
+compare the sum of elpid_i, we can use loo_compare function:
+
+```{r}
+loo_compare(loo1, loo2)
+```
+
+Therefore by comparing the sum, model 2 is preferred. 
+
+
+e)  Create a scatter plot of the $ELPD_i$'s for Model 2 versus the
+    $ELPD_i$'s for Model 1. Create another scatter plot of the
+    difference in $ELPD_i$'s between the models versus log arsenic. In
+    both cases, color the dots based on the value of $y_i$. Interpret
+    both plots.
+    
+now let us do the first scatter plot elpd_i_mod1 versus elpid_i_mod2
+
+```{r}
+tibble(ds$switch,elpd_i_mod1,elpd_i_mod2) |>
+  ggplot(aes(x = elpd_i_mod1, y = elpd_i_mod2, color = as.factor(ds$switch))) +
+  geom_point(alpha = 0.6) +
+  labs(title = 'ELPD_i of model 1 vs ELPD_i of model 2',  color = 'Swtich')+
+  theme_classic() 
+```
+as we can see from the graph, the expected log pointwise predictive density, for when yi = 0 is more evenly distributed from elpd_i_mod1 from -4 to 0, and elpd_i_mod2 from -2.5 to 0, but for yi =1 , it is more centred at elpd_i_mod1 from -2 to 0, and elpd_i_mod2 from -1.5 to 0. 
+
+It is also observed that model 2's predictive density is on a smaller range.
+
+Now for the second part, we plot the difference between ELPD_i and the log arsenic:
+
+```{r}
+tibble(ds$switch,elpd_i_mod1-elpd_i_mod2, log(ds$arsenic)) |>
+  ggplot(aes(x = elpd_i_mod1-elpd_i_mod2, y = log(ds$arsenic), color = as.factor(ds$switch))) +
+  geom_point(alpha = 0.6) +
+  labs(title = 'Differences between ELPD_i and log(arsenic) ',  color = 'Swtich')+
+  theme_classic()
+```
+as we can see, that most of the differences is around 0, with yi = 1 bending leftward, and yi = 0 bending rightward, and extreme values of the differnce is often observed when yi = 0 and the log(arsenic) is high.
+
+f)  Given the outcome in this case is discrete, we can directly
+    interpret the $ELPD_i$s. In particular, what is $\exp(ELPD_i)$?
+    
+it is the pointwise predictive density at yi given the model is fitted on all the data but yi.
+
+I hope the above explanation was correct...but the general idea is that it is that we fit the model without yi, and use the model to predict the value of yi, so the value is the probability of yi = 1.
+
+g)  For each model recode the $ELPD_i$'s to get
+    $\hat{y}_{i}=E\left(Y_{i} | \boldsymbol{y}_{-i}\right)$. Create a
+    binned residual plot, looking at the average residual
+    $y_i - \hat{y}_i$ by arsenic for Model 1 and by log(arsenic) for
+    Model 2. Split the data such that there are 40 bins. On your plots,
+    the average residual should be shown with a dot for each bin. In
+    addition, add in a line to represent +/- 2 standard errors for each
+    bin. Interpret the plots for both models.
+    
+Let's do the plot for model 1 first:
+
+```{r}
+y_hat1 <- ifelse(exp(elpd_i_mod1)<=0.5, 0,1)
+res <- ds$switch - y_hat1
+bins <- cut(ds$arsenic, breaks = 40)
+
+tibble(res, arsenic = ds$arsenic, bins) |>
+  group_by(bins) |>
+  summarise(mean = mean(res), sd = sd(res)) |>
+  ggplot(aes(x = bins, y = mean)) +
+  geom_point()+
+  geom_errorbar( aes(ymin = mean-2*sd, ymax = mean+2*sd),width = 0.2)+
+  labs(title = 'Model 1 Arsenic level vs Residual', y = 'mean of residual', x ='level of arsenic')+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+```
+
+as we can see from the above plot, the Model 1's predict less accurately when the arsenic is in the level of 0.501 to 4.85, and predict very accurately for the region of arsenic level greater than 4.85. 
+Here a mean of 0 means all the residuals in that group is 0. 
+
+
+now let's plot for model 2:
+
+```{r}
+y_hat2 <- ifelse(exp(elpd_i_mod2)<=0.5, 0,1)
+res <- ds$switch - y_hat2
+bins <- cut(log(ds$arsenic), breaks = 40)
+
+tibble(res, log_arsenic = log(ds$arsenic), bins) |>
+  group_by(bins) |>
+  summarise(mean = mean(res), sd = sd(res)) |>
+  ggplot(aes(x = bins, y = mean)) +
+  geom_point()+
+  geom_errorbar( aes(ymin = mean-2*sd, ymax = mean+2*sd),width = 0.2)+
+  labs(title = 'Model 2 Log Arsenic level vs Residual', y = 'mean of residual', x ='level of arsenic')+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+```
+
+
+as we can see from model 2,on average it has a larger prediction residual compare to that of model 1, and it makes accurate predictions for less bins compare to model1, but this could be because of the way we classify the bins, as well as the ways we classify y_hat. But in general here, model 1 did a better job in terms of prediction, while model2's prediction in is better when log of arsenic level is low. 
