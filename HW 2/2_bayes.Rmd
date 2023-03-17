@@ -18,6 +18,7 @@ stan files
 
 ```{r}
 library(tidyverse)
+options(dplyr.summarise.inform = FALSE)
 ```
 
 \newpage
@@ -152,8 +153,8 @@ Poisson distributed with a rate equal to the mortality rate multiplied
 by the population, i.e. $$
 D_x \sim \text{Poisson}(\mu_xP_x)
 $$ where $x$ refers to age. In this question we will be estimating
-mortality rates using the Gompertz model as described above.
-let's first read in the data:
+mortality rates using the Gompertz model as described above. let's first
+read in the data:
 
 ```{r}
 data <- read.csv('sweden.csv')
@@ -161,15 +162,19 @@ data <- read.csv('sweden.csv')
 
 a)  Describe, with the aid of a couple of graphs, some key observations
     of how mortality above age 50 in Sweden has changed over time.
-    
+
 let's first see the range of the age group:
+
 ```{r}
 min(data$age)
 max(data$age)
 ```
-as we can see from the results above, the minimum age of mortality is 50 in the data, and maximum is 100 ages old.
 
-Let's divide the age group into 5 groups, 50-59,60-69,70-79,80-89,90-100:
+as we can see from the results above, the minimum age of mortality is 50
+in the data, and maximum is 100 ages old.
+
+Let's divide the age group into 5 groups,
+50-59,60-69,70-79,80-89,90-100:
 
 ```{r}
 library(dplyr)
@@ -190,7 +195,8 @@ df <- data |>
 
 ```
 
-and we can make a plot of the log death number, filtered by age group, averaged on the group mean:
+and we can make a plot of the log death number, filtered by age group,
+averaged on the group mean:
 
 ```{r}
 df |> 
@@ -202,7 +208,12 @@ df |>
   theme_classic()
 ```
 
-As we can see, if we separate things on the number of deaths, all the age groups are pretty layered. Although it is quite surprising that age group 80-89 has the highest deaths number, this could be quite biased because we are not comparing them at a similar scale; therefore, we can convert them into mortality rate by dividing them into group log mortality rate:
+As we can see, if we separate things on the number of deaths, all the
+age groups are pretty layered. Although it is quite surprising that age
+group 80-89 has the highest deaths number, this could be quite biased
+because we are not comparing them at a similar scale; therefore, we can
+convert them into mortality rate by dividing them into group log
+mortality rate:
 
 ```{r}
 df |> 
@@ -213,7 +224,12 @@ df |>
   labs(title = 'Group average deaths plot by year', y = "average deaths")+
   theme_classic()
 ```
-as we can see, the log mortality rate is very well layered with highest to lowest based the magnitude of age. this could be very helpful for us to later fit the model, to be safe, let's also look at the case where we divide them in to 10 groups instead of 5 groups, see if the result could be persistent.
+
+as we can see, the log mortality rate is very well layered with highest
+to lowest based the magnitude of age. this could be very helpful for us
+to later fit the model, to be safe, let's also look at the case where we
+divide them in to 10 groups instead of 5 groups, see if the result could
+be persistent.
 
 ```{r}
 data |>
@@ -245,14 +261,17 @@ data |>
   theme_classic()
 ```
 
-as we can see, they are still very wellly layered out, therefore suggesting that a layered mortality rate model would be useful for weakly informative prior in model fitting, and in terms of trend with respect to time, the mortality rate is in general decreasing, with smaller the age, the more significant the decrement is.
-
+as we can see, they are still very wellly layered out, therefore
+suggesting that a layered mortality rate model would be useful for
+weakly informative prior in model fitting, and in terms of trend with
+respect to time, the mortality rate is in general decreasing, with
+smaller the age, the more significant the decrement is.
 
 b)  Carry out prior predictive checks for $\alpha$ and $\beta$, based on
     populations by age in Sweden in 2020. Summarize what you find and
     what you decide to be weakly informative priors for these
     parameters.
-    
+
 let's look at the mortality rate for 2020:
 
 ```{r}
@@ -265,11 +284,109 @@ df |>
   labs(title = 'Year 2020 age vs. log mortality') +
   theme_bw()
 ```
-as we can see the log mortality is nearly a linear line, that gives us good reasoning to estimate alpha and beta:
+
+as we can see the log mortality is nearly a linear line, that gives us
+good reasoning to estimate alpha and beta:
+
+we have $\mu_x = \alpha e^{\beta x}$
+
+hence $log(\mu_x = log(\alpha) + \beta x) $ hence fitting in a linear regression model we can get our estimate on alpha and beta:
 
 ```{r}
+ef <- df |>  
+  group_by(age,year) |>
+  summarise(avg_mortality = mean(deaths)/mean(pop)) |>
+  filter(year == 2020)
+
+summary(lm(log(avg_mortality)~age, data = ef))
 
 ```
+this gives us an estimate of $\beta = 0.1159, \alpha = e^{-12.28} \approx 4.643696e-06$
+
+using this as prior information, and the scale is clearer to us, we can have weakly informative priors of :
+
+$$
+\beta \sim N(0.1159, 0.03)\\
+log(\alpha) \sim N(-12.28, 3)
+$$
+following this, we can have a quick check upon the death number distribution of age 75 (median of the ages):
+
+```{r}
+set.seed(1024)
+beta <- rnorm(1000, 0.1159, 0.03)
+alpha <- exp(rnorm(1000, -12.28,3))
+A <- 75
+P_A <- filter(df, year == 2020, age == A)$pop
+lam <- alpha*exp(beta*A)*P_A
+prior_sim <- rpois(length(lam), lam) # generate the numbers
+# and we can plot the histogram
+
+tibble(death = prior_sim, pop = P_A) |>
+  ggplot(aes(log(prior_sim/pop))) +
+  geom_histogram(bins = 40, aes(fill = 'simulated')) +
+  geom_vline(aes(xintercept = log(filter(ef, age == A)$avg_mortality), color = "observed"), lwd = 2)+
+  scale_color_manual(name = "", 
+                     values = c("observed" = "darkblue"))+
+  scale_fill_manual(name = "", 
+                     values = c("simulated" = "lightblue")) +
+  labs(title = "Prior checks for age 75")+ 
+  theme_bw()
+  
+```
+as we can see, it aligns with our distribution quite well
+
+we can also take a look at age 65, and age 85:
+
+for Age 65:
+
+```{r}
+set.seed(1024)
+beta <- rnorm(1000, 0.1159, 0.03)
+alpha <- exp(rnorm(1000, -12.28,3))
+A <- 65
+P_A <- filter(df, year == 2020, age == A)$pop
+lam <- alpha*exp(beta*A)*P_A
+prior_sim <- rpois(length(lam), lam) # generate the numbers
+# and we can plot the histogram
+
+tibble(death = prior_sim, pop = P_A) |>
+  ggplot(aes(log(prior_sim/pop))) +
+  geom_histogram(bins = 40, aes(fill = 'simulated')) +
+  geom_vline(aes(xintercept = log(filter(ef, age == A)$avg_mortality), color = "observed"), lwd = 2)+
+  scale_color_manual(name = "", 
+                     values = c("observed" = "darkblue"))+
+  scale_fill_manual(name = "", 
+                     values = c("simulated" = "lightblue")) +
+  labs(title = "Prior checks for age 65")+ 
+  theme_bw()
+  
+```
+and age 85:
+
+```{r}
+set.seed(1024)
+beta <- rnorm(1000, 0.1159, 0.03)
+alpha <- exp(rnorm(1000, -12.28,3))
+A <- 85
+P_A <- filter(df, year == 2020, age == A)$pop
+lam <- alpha*exp(beta*A)*P_A
+prior_sim <- rpois(length(lam), lam) # generate the numbers
+# and we can plot the histogram
+
+tibble(death = prior_sim, pop = P_A) |>
+  ggplot(aes(log(prior_sim/pop))) +
+  geom_histogram(bins = 40, aes(fill = 'simulated')) +
+  geom_vline(aes(xintercept = log(filter(ef, age == A)$avg_mortality), color = "observed"), lwd = 2)+
+  scale_color_manual(name = "", 
+                     values = c("observed" = "darkblue"))+
+  scale_fill_manual(name = "", 
+                     values = c("simulated" = "lightblue")) +
+  labs(title = "Prior checks for age 85")+ 
+  theme_bw()
+  
+```
+as we can see, they all fit the model well;
+
 
 c)  Fit a model in Stan to estimate $\alpha$ and $\beta$ for the
     year 2020. Note that it may be easier to specify the likelihood on
@@ -278,6 +395,26 @@ c)  Fit a model in Stan to estimate $\alpha$ and $\beta$ for the
     and any other information available. Ensure that the model has
     converged and other diagnostics are good. Interpret your estimates
     for $\alpha$ and $\beta$.
+    
+Let's use the code in Q2_model1.stan
+
+```{r}
+library(rstan)
+stan_data <-list(N = nrow(ef),
+                 y = filter(df, year == 2020)$death,
+                 x = ef$age,
+                 log_p = log(filter(df, year == 2020)$pop))
+
+mod_q2_1 <- stan(data = stan_data,
+                 file = 'Q2_model1.stan',
+                 iter = 2000,
+                 seed = 1024)
+
+```
+```{r}
+summary(mod_q2_1)$summary[1:2,]
+```
+
 d)  Carry out some posterior predictive checks to assess model
     performance.\
 e)  Now extend your model to estimate $\alpha$ and $\beta$ in every year
@@ -437,13 +574,20 @@ now we can extract the model summary for such from mod1:
 ```{r}
 summary(mod1)$summary[1:4,]
 ```
+
 with the above information, we can say that:
 
-beta0 : holding other dist-mean(dist), and arsenic- mean(arsenic) 0, on average people is exp(0.350292367) -1 = 42% more likely to switch to a new well
-beta1, beta3 : holding arsenic - mean(arsenic) constant, with one unit increase in dist-mean(dist), people are 1- exp(-0.008789761-0.001783209) = 1.05% less likely to switch to a new well.
-beta2, beta3 : holding dist - mean(dist) constant, with one unit increase in arsenic-mean(arsenic), people are exp(0.470130182 - -0.001783209) -1 = 60% more likely to switch to a new well.
+beta0 : holding other dist-mean(dist), and arsenic- mean(arsenic) 0, on
+average people is exp(0.350292367) -1 = 42% more likely to switch to a
+new well beta1, beta3 : holding arsenic - mean(arsenic) constant, with
+one unit increase in dist-mean(dist), people are 1-
+exp(-0.008789761-0.001783209) = 1.05% less likely to switch to a new
+well. beta2, beta3 : holding dist - mean(dist) constant, with one unit
+increase in arsenic-mean(arsenic), people are exp(0.470130182 -
+-0.001783209) -1 = 60% more likely to switch to a new well.
 
 and we save the log-likelihood and p_hat
+
 ```{r}
 log_lik_mod1 <- extract(mod1)[['log_lik']]
 p_hat_mod1 <- extract(mod1)[['p_hat']]
@@ -458,15 +602,13 @@ mod2 <- stan(data = stan_data,
              seed = 245)
 summary(mod2)$summary[1:4,]
 ```
+
 and we can extract the results from mod2:
 
 ```{r}
 log_lik_mod2 <- extract(mod2)[['log_lik']]
 p_hat_mod2 <- extract(mod2)[['p_hat']]
 ```
-
-
-
 
 c)  Let
     $t(\boldsymbol{y})=\sum_{i=1}^{n} 1\left(y_{i}=1, a_{i}<0.82\right) / \sum_{i=1}^{n} 1\left(a_{i}<0.82\right)$
@@ -512,6 +654,7 @@ stat_mod1 |>
 ```
 
 now for model 2:
+
 ```{r}
 #Model 2:
 
@@ -529,6 +672,7 @@ stat_mod2 |>
   # the manual change of color idea is adapted from professor's blog post
   theme_classic()
 ```
+
 To calculate the proportion of the time:
 
 ```{r}
@@ -540,14 +684,18 @@ paste('The probability for t(y_rep) <t(y) for model 1 is: ', sum(stat_mod1 < sta
 
 paste('The probability for t(y_rep) <t(y) for model 2 is: ', sum(stat_mod2 < stat_y)/nrow(p_hat_mod2))
 ```
-as we can see, under a test statistics we used in c), model 2 has a better performance of 28.4% of the statistics we acquired from model 2 is less than the observed statistics, while for model 1 there is only 0.6% chance for its statistics to be less than the observed statistics.
+
+as we can see, under a test statistics we used in c), model 2 has a
+better performance of 28.4% of the statistics we acquired from model 2
+is less than the observed statistics, while for model 1 there is only
+0.6% chance for its statistics to be less than the observed statistics.
 
 Therefore at this point of time, model 2 hass a better performance.
 
 d)  Use the `loo` package to get estimates of the expected log pointwise
     predictive density for each point, $ELPD_i$. Based on
     $\sum_i ELPD_i$, which model is preferred?
-    
+
 let's get the ELPD_i here:
 
 ```{r}
@@ -555,7 +703,9 @@ library(loo)
 loo1 <- loo(log_lik_mod1, save_psis = TRUE)
 loo2 <- loo(log_lik_mod2, save_psis = TRUE)
 ```
-and we can store the computed elpd_i in each elpd_i_mod1 and elpd_i_mod2:
+
+and we can store the computed elpd_i in each elpd_i\_mod1 and
+elpd_i\_mod2:
 
 ```{r}
 elpd_i_mod1 <- loo1$pointwise[,1]
@@ -568,16 +718,15 @@ compare the sum of elpid_i, we can use loo_compare function:
 loo_compare(loo1, loo2)
 ```
 
-Therefore by comparing the sum, model 2 is preferred. 
-
+Therefore by comparing the sum, model 2 is preferred.
 
 e)  Create a scatter plot of the $ELPD_i$'s for Model 2 versus the
     $ELPD_i$'s for Model 1. Create another scatter plot of the
     difference in $ELPD_i$'s between the models versus log arsenic. In
     both cases, color the dots based on the value of $y_i$. Interpret
     both plots.
-    
-now let us do the first scatter plot elpd_i_mod1 versus elpid_i_mod2
+
+now let us do the first scatter plot elpd_i\_mod1 versus elpid_i\_mod2
 
 ```{r}
 tibble(ds$switch,elpd_i_mod1,elpd_i_mod2) |>
@@ -586,11 +735,18 @@ tibble(ds$switch,elpd_i_mod1,elpd_i_mod2) |>
   labs(title = 'ELPD_i of model 1 vs ELPD_i of model 2',  color = 'Swtich')+
   theme_classic() 
 ```
-as we can see from the graph, the expected log pointwise predictive density, for when yi = 0 is more evenly distributed from elpd_i_mod1 from -4 to 0, and elpd_i_mod2 from -2.5 to 0, but for yi =1 , it is more centred at elpd_i_mod1 from -2 to 0, and elpd_i_mod2 from -1.5 to 0. 
 
-It is also observed that model 2's predictive density is on a smaller range.
+as we can see from the graph, the expected log pointwise predictive
+density, for when yi = 0 is more evenly distributed from elpd_i\_mod1
+from -4 to 0, and elpd_i\_mod2 from -2.5 to 0, but for yi =1 , it is
+more centred at elpd_i\_mod1 from -2 to 0, and elpd_i\_mod2 from -1.5 to
+0.
 
-Now for the second part, we plot the difference between ELPD_i and the log arsenic:
+It is also observed that model 2's predictive density is on a smaller
+range.
+
+Now for the second part, we plot the difference between ELPD_i and the
+log arsenic:
 
 ```{r}
 tibble(ds$switch,elpd_i_mod1-elpd_i_mod2, log(ds$arsenic)) |>
@@ -599,14 +755,21 @@ tibble(ds$switch,elpd_i_mod1-elpd_i_mod2, log(ds$arsenic)) |>
   labs(title = 'Differences between ELPD_i and log(arsenic) ',  color = 'Swtich')+
   theme_classic()
 ```
-as we can see, that most of the differences is around 0, with yi = 1 bending leftward, and yi = 0 bending rightward, and extreme values of the differnce is often observed when yi = 0 and the log(arsenic) is high.
+
+as we can see, that most of the differences is around 0, with yi = 1
+bending leftward, and yi = 0 bending rightward, and extreme values of
+the differnce is often observed when yi = 0 and the log(arsenic) is
+high.
 
 f)  Given the outcome in this case is discrete, we can directly
     interpret the $ELPD_i$s. In particular, what is $\exp(ELPD_i)$?
-    
-it is the pointwise predictive density at yi given the model is fitted on all the data but yi.
 
-I hope the above explanation was correct...but the general idea is that it is that we fit the model without yi, and use the model to predict the value of yi, so the value is the probability of yi = 1.
+it is the pointwise predictive density at yi given the model is fitted
+on all the data but yi.
+
+I hope the above explanation was correct...but the general idea is that
+it is that we fit the model without yi, and use the model to predict the
+value of yi, so the value is the probability of yi = 1.
 
 g)  For each model recode the $ELPD_i$'s to get
     $\hat{y}_{i}=E\left(Y_{i} | \boldsymbol{y}_{-i}\right)$. Create a
@@ -616,7 +779,7 @@ g)  For each model recode the $ELPD_i$'s to get
     the average residual should be shown with a dot for each bin. In
     addition, add in a line to represent +/- 2 standard errors for each
     bin. Interpret the plots for both models.
-    
+
 Let's do the plot for model 1 first:
 
 ```{r}
@@ -637,9 +800,10 @@ tibble(res, arsenic = ds$arsenic, bins) |>
 
 ```
 
-as we can see from the above plot, the Model 1's predict less accurately when the arsenic is in the level of 0.501 to 4.85, and predict very accurately for the region of arsenic level greater than 4.85. 
-Here a mean of 0 means all the residuals in that group is 0. 
-
+as we can see from the above plot, the Model 1's predict less accurately
+when the arsenic is in the level of 0.501 to 4.85, and predict very
+accurately for the region of arsenic level greater than 4.85. Here a
+mean of 0 means all the residuals in that group is 0.
 
 now let's plot for model 2:
 
@@ -661,5 +825,9 @@ tibble(res, log_arsenic = log(ds$arsenic), bins) |>
 
 ```
 
-
-as we can see from model 2,on average it has a larger prediction residual compare to that of model 1, and it makes accurate predictions for less bins compare to model1, but this could be because of the way we classify the bins, as well as the ways we classify y_hat. But in general here, model 1 did a better job in terms of prediction, while model2's prediction in is better when log of arsenic level is low. 
+as we can see from model 2,on average it has a larger prediction
+residual compare to that of model 1, and it makes accurate predictions
+for less bins compare to model1, but this could be because of the way we
+classify the bins, as well as the ways we classify y_hat. But in general
+here, model 1 did a better job in terms of prediction, while model2's
+prediction in is better when log of arsenic level is low.
