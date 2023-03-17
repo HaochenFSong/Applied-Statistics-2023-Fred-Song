@@ -25,3 +25,14 @@ model {
   beta ~ normal(0.1159, 0.05);
 }
 
+generated quantities{
+  vector[N] log_prob;    // log_mortality ratio
+  vector[N] y_hat; // replications of death number
+
+  for (n in 1:N) {
+    real log_mortality = log_alpha + beta * x[n] + log_p[n];
+    log_prob[n] = poisson_log_lpmf(y[n] | log_mortality);
+    y_hat[n] = poisson_log_rng(log_mortality);}
+    
+}
+

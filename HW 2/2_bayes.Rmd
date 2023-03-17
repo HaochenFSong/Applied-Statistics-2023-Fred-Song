@@ -7,6 +7,9 @@ fontsize: 11pt
 editor_options: 
   markdown: 
     wrap: 72
+execute: 
+  warning: false
+  message: false
 ---
 
 **Due:** 11:59pm ET, March 10
@@ -116,7 +119,7 @@ over MSE Ml:
 n.values = seq(1,50, by = 1)
 
 MSE_ratio <- function(n){
-  (15^2/(n+1)+((113*n+100)/(n+1) - 112)^2)/(1+ 15^2/n)
+  (15^2/(n+1)+((113*n+100)/(n+1) - 112)^2)/(15^2/n)
 }
 
 ratio <- MSE_ratio(n.values)
@@ -130,7 +133,7 @@ tibble(n.values, ratio) |>
 
 as we can see, with a y_bar of 112 fixed, Bayes estimator significantly
 outperforms ML estimator when n is less than 30, but when n gets larger,
-such out-performance decreases.
+such out-performance decreases and eventually becomes worse.
 
 \newpage
 
@@ -290,7 +293,10 @@ good reasoning to estimate alpha and beta:
 
 we have $\mu_x = \alpha e^{\beta x}$
 
-hence $log(\mu_x = log(\alpha) + \beta x) $ hence fitting in a linear regression model we can get our estimate on alpha and beta:
+hence 
+$$log(\mu_x)= log(\alpha) + \beta x $$  
+
+hence fitting in a linear regression model we can get our estimate on alpha and beta:
 
 ```{r}
 ef <- df |>  
@@ -306,14 +312,14 @@ this gives us an estimate of $\beta = 0.1159, \alpha = e^{-12.28} \approx 4.6436
 using this as prior information, and the scale is clearer to us, we can have weakly informative priors of :
 
 $$
-\beta \sim N(0.1159, 0.03)\\
+\beta \sim N(0.1159, 0.05)\\
 log(\alpha) \sim N(-12.28, 3)
 $$
 following this, we can have a quick check upon the death number distribution of age 75 (median of the ages):
 
 ```{r}
 set.seed(1024)
-beta <- rnorm(1000, 0.1159, 0.03)
+beta <- rnorm(1000, 0.1159, 0.05)
 alpha <- exp(rnorm(1000, -12.28,3))
 A <- 75
 P_A <- filter(df, year == 2020, age == A)$pop
@@ -341,7 +347,7 @@ for Age 65:
 
 ```{r}
 set.seed(1024)
-beta <- rnorm(1000, 0.1159, 0.03)
+beta <- rnorm(1000, 0.1159, 0.05)
 alpha <- exp(rnorm(1000, -12.28,3))
 A <- 65
 P_A <- filter(df, year == 2020, age == A)$pop
@@ -365,7 +371,7 @@ and age 85:
 
 ```{r}
 set.seed(1024)
-beta <- rnorm(1000, 0.1159, 0.03)
+beta <- rnorm(1000, 0.1159, 0.05)
 alpha <- exp(rnorm(1000, -12.28,3))
 A <- 85
 P_A <- filter(df, year == 2020, age == A)$pop
@@ -408,19 +414,197 @@ stan_data <-list(N = nrow(ef),
 mod_q2_1 <- stan(data = stan_data,
                  file = 'Q2_model1.stan',
                  iter = 2000,
-                 seed = 1024)
+                 seed = 1025)
 
 ```
 ```{r}
 summary(mod_q2_1)$summary[1:2,]
 ```
 
+as we can see, the model converges really nicely. and log_alpha means at an age of 0 (not possible but to interpret the model), the effect on the population of the mean of deaths number is exp(-12.5955744) <- which is the value of exp(log(alpha)) = alpha
+
+the beta is the effect on one year increment in age, can result in a exp(0.1195835) - 1 = 12.7% increment in the effect upon population.
+
+
 d)  Carry out some posterior predictive checks to assess model
     performance.\
+    
+we can first look at the median of deaths rate between observed data and the simulated data:
+
+```{r}
+library(bayesplot) 
+library(loo) 
+library(tidybayes) 
+y_rep <- extract(mod_q2_1)[["y_hat"]]
+d = filter(df, year == 2020)$deaths
+ppc_stat(d, y_rep, stat = 'median')
+```
+
+as we can see, the median aligns with the simulated data very well.
+
+furthermore, We can also compare the LOO-PIT of the model to standard uniforms:
+
+```{r}
+loglik1 <- extract(mod_q2_1)[["log_prob"]]
+loo1 <- loo(loglik1, save_psis = TRUE)
+ppc_loo_pit_overlay(yrep = y_rep, y = filter(df, year == 2020)$deaths, lw = weights(loo1$psis_object))
+```
+but such plot is not working very well in the case, looking into the documentation, the PSIS check will not work very well on discrete cases, so let's come up with something else:
+
+we will compare the death number at age 70:
+
+```{r}
+A = 70
+stat_mod <- c()
+stat_y <- sum(filter(df, year == 2020, age == A)$deaths)
+for (i in 1:nrow(y_rep)){
+  stat_mod[i] <- y_rep[i, A-50+1]
+}
+```
+and plot them into one graph we can see:
+```{r}
+stat_mod |> 
+  as.tibble() |>
+  ggplot(aes(value)) +
+  geom_histogram(aes(fill = 'simulated'))+
+  geom_vline(aes(xintercept = stat_y, color = "observed"), lwd = 2)+
+  ggtitle('Model test statistics death number at age 70')+
+  labs(x='death number') +
+  scale_color_manual(name = "", 
+                     values = c("observed" = "darkblue"))+
+  scale_fill_manual(name = "", 
+                     values = c("simulated" = "lightblue")) +
+  # the manual change of color idea is adapted from professor's blog post
+  theme_classic()
+```
+can also look at age 55, and age 80:
+
+we will compare the death number at age 70:
+
+```{r}
+A = 55
+stat_mod <- c()
+stat_y <- sum(filter(df, year == 2020, age == A)$deaths)
+for (i in 1:nrow(y_rep)){
+  stat_mod[i] <- y_rep[i, A-50+1]
+}
+
+stat_mod |> 
+  as.tibble() |>
+  ggplot(aes(value)) +
+  geom_histogram(aes(fill = 'simulated'))+
+  geom_vline(aes(xintercept = stat_y, color = "observed"), lwd = 2)+
+  ggtitle('Model test statistics death number at age 55')+
+  labs(x='death number') +
+  scale_color_manual(name = "", 
+                     values = c("observed" = "darkblue"))+
+  scale_fill_manual(name = "", 
+                     values = c("simulated" = "lightblue")) +
+  # the manual change of color idea is adapted from professor's blog post
+  theme_classic()
+```
+
+```{r}
+A = 80
+stat_mod <- c()
+stat_y <- sum(filter(df, year == 2020, age == A)$deaths)
+for (i in 1:nrow(y_rep)){
+  stat_mod[i] <- y_rep[i, A-50+1]
+}
+
+stat_mod |> 
+  as.tibble() |>
+  ggplot(aes(value)) +
+  geom_histogram(aes(fill = 'simulated'))+
+  geom_vline(aes(xintercept = stat_y, color = "observed"), lwd = 2)+
+  ggtitle('Model test statistics death number at age 55')+
+  labs(x='death number') +
+  scale_color_manual(name = "", 
+                     values = c("observed" = "darkblue"))+
+  scale_fill_manual(name = "", 
+                     values = c("simulated" = "lightblue")) +
+  # the manual change of color idea is adapted from professor's blog post
+  theme_classic()
+```
+as we can see, it is also not showing a very good result in the sense that this statistisc is very time-dependent, but our simulation is not too off. Let's do one more PPC of mean values:
+
+```{r}
+ppc_stat(filter(df, year == 2020)$deaths, y_rep, stat = 'mean')
+```
+as shown in the graph, using mean values to PPC gave us good results.
+
+
 e)  Now extend your model to estimate $\alpha$ and $\beta$ in every year
     over the interval 1990-2020. Plot the resulting point estimates and
     95% credible intervals for your estimates of $\alpha$ and $\beta$
     over time. Comment briefly on what you observe.
+    
+Let's put the code at Q2_model2.stan, and run the results below:
+
+```{r}
+
+d <- df |>
+  select(age,year,deaths) |>
+  pivot_wider(names_from = 'year', values_from = 'deaths') |>
+  as.matrix()
+
+p <- df |>
+  select(age,year,pop) |>
+  pivot_wider(names_from = 'year', values_from = 'pop') |>
+  as.matrix()
+
+stan_data <-list(N = nrow(ef),
+                 Time = nrow(unique(select(df,year))),
+                 y = d[,-1],
+                 x = ef$age,
+                 log_p = log(p[,-1]))
+
+mod_q2_2 <- stan(data = stan_data,
+                 file = 'Q2_model2.stan',
+                 iter = 2000,
+                 seed = 1025)
+```
+```{r}
+# let's draw for alpha 1 first:
+library(dplyr)
+mod_q2_2 |> 
+  gather_draws(log_alpha[i]) |>
+  median_qi() |>
+  rename(median_mod = .value,
+         lower_mod = .lower,
+         upper_mod = .upper) |>
+  dplyr::select(i, median_mod:upper_mod) |>
+  ggplot(aes(1990:2020, median_mod)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_mod, ymax = upper_mod)) +
+  labs(title = 'scatter plot and 95% credible interval for log_alpha', x = 'time', y = 'log_alpha') +
+  theme_bw()
+
+
+
+
+```
+as we can see from the graph, the estimate for alpha ranging from year 1990 to 2020 does not change by much, but the variability is very significant across many years.
+
+now for beta:
+
+```{r}
+mod_q2_2 |> 
+  gather_draws(beta[i]) |>
+  median_qi() |>
+  rename(median_mod = .value,
+         lower_mod = .lower,
+         upper_mod = .upper) |>
+  dplyr::select(i, median_mod:upper_mod) |>
+  ggplot(aes(1990:2020, median_mod)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_mod, ymax = upper_mod)) +
+  labs(title = 'scatter plot and 95% credible interval for beta', x = 'time', y = 'beta') +
+  theme_bw()
+```
+as we can see from the graph, the beta also flucatuate around a mean value around -0.25 from 1990 to 2020, but the variablity is quite large across samples.
+
+
 f)  Life expectancy at age $x$ is defined as $$
     \int_x^{\omega} e^{-\mu_a}da
     $$ where $\omega$ is the oldest age group (you may assume this is
@@ -431,6 +615,65 @@ f)  Life expectancy at age $x$ is defined as $$
     for every year from 1990-2020. Plot your resulting point estimates
     and 95% credible intervals over time and comment briefly.
 
+well this question is to sum:
+
+$$
+\int_x^{\omega} e^{-\mu_a} da = \sum_{x= 40}^{100} e^{-\alpha_t exp(\beta_t x)}
+$$
+let's define a helper function for such:
+
+```{r}
+life_expec <- function(a, b){
+  ex = 0
+  for (x in 40:100){
+    ex = ex + exp(-a*exp(b*x))
+  }
+  return(ex)
+}
+```
+
+
+therefore we can calculate the life expectation using the data we acquired:
+
+```{r}
+alpha <- mod_q2_2 |> 
+  gather_draws(log_alpha[i]) |>
+  median_qi() |>
+  rename(median_alpha = .value,
+         lower_alpha = .lower,
+         upper_alpha = .upper) |>
+  dplyr::select(i, median_alpha:upper_alpha)
+
+beta <- mod_q2_2 |> 
+  gather_draws(beta[i]) |>
+  median_qi() |>
+  rename(median_beta = .value,
+         lower_beta = .lower,
+         upper_beta = .upper) |>
+  dplyr::select(i, median_beta:upper_beta)
+
+```
+
+
+```{r}
+lower_ex <- c()
+median_ex <- c()
+upper_ex <- c()
+
+for (i in 1:31){
+  lower_ex[i] = life_expec(exp(alpha$lower_alpha[i]), beta$lower_beta[i])
+  median_ex[i] = life_expec(exp(alpha$median_alpha[i]), beta$median_beta[i])
+  upper_ex[i] = life_expec(exp(alpha$upper_alpha[i]), beta$upper_beta[i])
+}
+
+tibble(lower_ex, median_ex, upper_ex) |>
+  ggplot(aes(1990:2020, median_ex)) +
+  geom_point() +
+  #geom_errorbar(aes(ymin = lower_ex, ymax = upper_ex)) +
+  labs(title = 'life expecation range from 1990 to 2020', x = 'time', y = 'life-expectation') +
+  theme_bw()
+```
+as we can see, the life expecatation slightly increases over the years. I didn't plot the error bar here but one can un-comment my geom_errorbar(aes(ymin = lower_ex, ymax = upper_ex)) to display it, it is just not showing any pattern with the error bar.
 \newpage
 
 # Wells
